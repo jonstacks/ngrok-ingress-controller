@@ -250,20 +250,14 @@ endef
 
 ##@ Helm
 
-.PHONY: _helm_setup
-_helm_setup:
-	./scripts/helm-setup.sh
-	helm repo add bitnami https://charts.bitnami.com/bitnami
-	helm dependency build $(HELM_CHART_DIR)
-
 .PHONY: helm-lint
-helm-lint: _helm_setup ## Lint the helm chart
-	helm lint $(HELM_CHART_DIR)
+helm-lint: ## Lint the helm chart
+	$(MAKE) -C $(HELM_CHART_DIR) lint
 
 .PHONY: helm-test
-helm-test: _helm_setup ## Run helm unittest plugin
-	helm unittest $(HELM_CHART_DIR)
+helm-test: ## Run helm unittest plugin
+	$(MAKE) -C $(HELM_CHART_DIR) test
 
 .PHONY: helm-update-snapshots
-helm-update-snapshots: _helm_setup ## Update helm unittest snapshots
-	helm unittest -u $(HELM_CHART_DIR)
+helm-update-snapshots: ## Update helm unittest snapshots
+	$(MAKE) -C $(HELM_CHART_DIR) update-snapshots
