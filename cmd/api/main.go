@@ -21,7 +21,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -40,6 +39,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -51,18 +51,15 @@ import (
 	bindingsv1alpha1 "github.com/ngrok/ngrok-operator/api/bindings/v1alpha1"
 	ingressv1alpha1 "github.com/ngrok/ngrok-operator/api/ingress/v1alpha1"
 	ngrokv1alpha1 "github.com/ngrok/ngrok-operator/api/ngrok/v1alpha1"
-	"github.com/ngrok/ngrok-operator/api/ngrok/v1beta1"
 	ngrokv1beta1 "github.com/ngrok/ngrok-operator/api/ngrok/v1beta1"
 	"github.com/ngrok/ngrok-operator/internal/annotations"
 	bindingscontroller "github.com/ngrok/ngrok-operator/internal/controller/bindings"
 	gatewaycontroller "github.com/ngrok/ngrok-operator/internal/controller/gateway"
 	ingresscontroller "github.com/ngrok/ngrok-operator/internal/controller/ingress"
 	ngrokcontroller "github.com/ngrok/ngrok-operator/internal/controller/ngrok"
-	"github.com/ngrok/ngrok-operator/internal/healthcheck"
 	"github.com/ngrok/ngrok-operator/internal/ngrokapi"
 	"github.com/ngrok/ngrok-operator/internal/store"
 	"github.com/ngrok/ngrok-operator/internal/version"
-	"github.com/ngrok/ngrok-operator/pkg/tunneldriver"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -113,8 +110,6 @@ type managerOpts struct {
 	ngrokAPIKey string
 
 	region string
-
-	rootCAs string
 }
 
 func cmd() *cobra.Command {
@@ -140,7 +135,6 @@ func cmd() *cobra.Command {
 	// TODO(operator-rename): Same as above, but for the manager name.
 	c.Flags().StringVar(&opts.managerName, "manager-name", "ngrok-ingress-controller-manager", "Manager name to identify unique ngrok ingress controller instances")
 	c.Flags().StringVar(&opts.clusterDomain, "cluster-domain", "svc.cluster.local", "Cluster domain used in the cluster")
-	c.Flags().StringVar(&opts.rootCAs, "root-cas", "trusted", "trusted (default) or host: use the trusted ngrok agent CA or the host CA")
 
 	// feature flags
 	c.Flags().BoolVar(&opts.enableFeatureIngress, "enable-feature-ingress", true, "Enables the Ingress controller")
@@ -270,57 +264,11 @@ func runController(ctx context.Context, opts managerOpts) error {
 	// please attach these to a feature set
 	//+kubebuilder:scaffold:builder
 
-	// shared features between Ingress and Gateway (tunnels)
-	if opts.enableFeatureIngress || opts.enableFeatureGateway {
-		var comments tunneldriver.TunnelDriverComments
-		if opts.enableFeatureGateway {
-			comments = tunneldriver.TunnelDriverComments{
-				Gateway: "gateway-api",
-			}
-		}
-
-		rootCAs := "trusted"
-		if opts.rootCAs != "" {
-			rootCAs = opts.rootCAs
-		}
-
-		td, err := tunneldriver.New(ctx, ctrl.Log.WithName("drivers").WithName("tunnel"),
-			tunneldriver.TunnelDriverOpts{
-				ServerAddr: opts.serverAddr,
-				Region:     opts.region,
-				RootCAs:    rootCAs,
-				Comments:   &comments,
-			},
-		)
-
-		if err != nil {
-			return fmt.Errorf("unable to create tunnel driver: %w", err)
-		}
-
-		// register healthcheck for tunnel driver
-		healthcheck.RegisterHealthChecker(td)
-
-		if err = (&ingresscontroller.TunnelReconciler{
-			Client:       mgr.GetClient(),
-			Log:          ctrl.Log.WithName("controllers").WithName("tunnel"),
-			Scheme:       mgr.GetScheme(),
-			Recorder:     mgr.GetEventRecorderFor("tunnel-controller"),
-			TunnelDriver: td,
-		}).SetupWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create controller", "controller", "Tunnel")
-			os.Exit(1)
-		}
-	}
-
 	// register healthchecks
-	if err := mgr.AddReadyzCheck("readyz", func(req *http.Request) error {
-		return healthcheck.Ready(req.Context(), req)
-	}); err != nil {
+	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		return fmt.Errorf("error setting up readyz check: %w", err)
 	}
-	if err := mgr.AddHealthzCheck("healthz", func(req *http.Request) error {
-		return healthcheck.Alive(req.Context(), req)
-	}); err != nil {
+	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		return fmt.Errorf("error setting up health check: %w", err)
 	}
 
@@ -402,7 +350,7 @@ func registerOperatorWithNgrokAPI(ctx context.Context, k8sClient client.Client, 
 	}
 
 	result, err := controllerutil.CreateOrUpdate(ctx, k8sClient, operatorConfiguration, func() error {
-		operatorConfiguration.Spec = v1beta1.OperatorConfigurationSpec{
+		operatorConfiguration.Spec = ngrokv1beta1.OperatorConfigurationSpec{
 			Ref:             *ref,
 			Description:     opts.description,
 			Metadata:        opts.ngrokMetadata, // TODO(hkatz) what is the format here?
