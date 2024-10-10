@@ -59,7 +59,7 @@ spec:
         image: {{ include "ngrok-operator.image" . }}
         imagePullPolicy: {{ .Values.image.pullPolicy }}
         command:
-        - /manager
+        - /api-manager
         args:
         {{- if .Values.description }}
         - --description={{ .Values.description | quote }}

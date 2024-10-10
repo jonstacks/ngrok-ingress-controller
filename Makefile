@@ -94,17 +94,20 @@ validate: build test lint manifests helm-update-snapshots ## Validate the codeba
 ##@ Build
 
 .PHONY: build
-build: preflight generate fmt vet _build ## Build manager binary.
+build: preflight generate fmt vet _build ## Build binaries.
 
 .PHONY: _build
 _build:
-	go build -o bin/manager -trimpath -ldflags "-s -w \
+	go build -o bin/api-manager -trimpath -ldflags "-s -w \
 		-X $(REPO_URL)/internal/version.gitCommit=$(GIT_COMMIT) \
-		-X $(REPO_URL)/internal/version.version=$(VERSION)" cmd/main.go
+		-X $(REPO_URL)/internal/version.version=$(VERSION)" cmd/api/main.go
+	go build -o bin/agent-manager -trimpath -ldflags "-s -w \
+		-X $(REPO_URL)/internal/version.gitCommit=$(GIT_COMMIT) \
+		-X $(REPO_URL)/internal/version.version=$(VERSION)" cmd/agent/main.go
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
-	go run ./cmd/main.go
+	go run ./cmd/api/main.go
 
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
